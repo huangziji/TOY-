@@ -16,6 +16,21 @@ myArray<float> &operator,(myArray<float> &a, float b)
     return a << b;
 }
 
+myArray<float> &operator<<(myArray<float> &a, vec4 b)
+{
+    return a << b.x, b.y, b.z, b.w;
+}
+
+myArray<float> &operator,(myArray<float> &a, vec4 b)
+{
+    return a << b;
+}
+
+myArray<float> &operator<<(myArray<float> &a, mat4 b)
+{
+    return a << b[0], b[1], b[2], b[3];
+}
+
 void myGui::drawRectangle(const vec4 &dst, const vec4 &src, const vec4 &col, int texSlot)
 {
     _quadBuffer << dst.x, dst.y, dst.z, dst.w,
@@ -96,3 +111,4 @@ void myDebugDraw::drawLine(const btVector3 &from, const btVector3 &to, const btV
             from.x(), from.y(), from.z(), col32,
             to.x(), to.y(), to.z(), col32;
 }
+

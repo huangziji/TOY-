@@ -11,7 +11,8 @@ _varying vec2 UV;
 flat _varying vec4 vCol;
 flat _varying uint vId;
 layout (location = 0) uniform vec2 iResolution;
-layout (binding  = 4) uniform sampler2D iChannel[2];
+layout (binding  = 4) uniform sampler2D iChannel4;
+layout (binding  = 5) uniform sampler2D iChannel5;
 
 #ifdef _VS
 layout (location = 1) in vec4 aDst;
@@ -35,9 +36,17 @@ void main()
 out vec4 fragColor;
 void main()
 {
-    vec2 texSize = vec2(textureSize(iChannel[vId], 0));
-    float d = textureLod(iChannel[vId], UV/texSize, 0.).r;
-    float t = smoothstep(.4, .5, d);
-    fragColor = vec4(vCol.xyz, max(vCol.w, t));
+    if (vId == 0U)
+    {
+        vec2 texSize = vec2(textureSize(iChannel4, 0));
+        float d = textureLod(iChannel4, UV/texSize, 0.).r;
+        fragColor = vec4(vCol.xyz, smoothstep(.4, .5, d));
+    }
+    else
+    {
+        vec2 texSize = vec2(textureSize(iChannel5, 0));
+        float d = textureLod(iChannel5, UV/texSize, 0.).r;
+        fragColor = vec4(vCol.xyz, d);
+    }
 }
 #endif
