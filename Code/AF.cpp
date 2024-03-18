@@ -5,6 +5,32 @@
 template <typename T> using myArray = btAlignedObjectArray<T>;
 using namespace glm;
 
+myArray<float> &operator<<(myArray<float> &a, float b)
+{
+    a.push_back(b);
+    return a;
+}
+
+myArray<float> &operator,(myArray<float> &a, float b)
+{
+    return a << b;
+}
+
+myArray<float> &operator<<(myArray<float> &a, vec4 b)
+{
+    return a << b.x, b.y, b.z, b.w;
+}
+
+myArray<float> &operator,(myArray<float> &a, vec4 b)
+{
+    return a << b;
+}
+
+myArray<float> &operator<<(myArray<float> &a, mat4 b)
+{
+    return a << b[0], b[1], b[2], b[3];
+}
+
 void Clear(btDynamicsWorld *physics)
 {
     for (int i = physics->getNumConstraints() - 1; i >= 0; i--)
@@ -37,12 +63,18 @@ mat4 drawPrimitive( vec3 origin, mat3 axis, vec3 halfExtend, int shapeType )
     return data;
 }
 
-mat4 drawRigidBody( btRigidBody const& rb )
+mat4 drawRigidBody( btCollisionObject const& rb )
 {
     vec3 h;
     int shapeType;
     switch (rb.getCollisionShape()->getShapeType())
     {
+    case STATIC_PLANE_PROXYTYPE:
+    {
+        h.x = -dynamic_cast<const btStaticPlaneShape*>(rb.getCollisionShape())->getPlaneConstant();
+        shapeType = 3;
+        break;
+    }
     case BOX_SHAPE_PROXYTYPE:
     {
         btVector3 halfExtents = dynamic_cast<const btBoxShape*>(rb.getCollisionShape())->getHalfExtentsWithMargin();
@@ -53,8 +85,8 @@ mat4 drawRigidBody( btRigidBody const& rb )
         break;
     }
     case CAPSULE_SHAPE_PROXYTYPE:
-        h.y = dynamic_cast<const btCapsuleShape*>(rb.getCollisionShape())->getRadius();
         h.x = dynamic_cast<const btCapsuleShape*>(rb.getCollisionShape())->getHalfHeight();
+        h.y = dynamic_cast<const btCapsuleShape*>(rb.getCollisionShape())->getRadius();
         shapeType = 2;
         break;
     }
@@ -70,9 +102,32 @@ mat4 drawRigidBody( btRigidBody const& rb )
 
 int loadAF(AF *self, btDynamicsWorld *physics)
 {
-    self->isActive_ = true;
+    const int AF_DATA[][12] = {
+         1,-1,    0,100,0,   15,10,10,  -1,-1,-1,  0,
+         2, 0,    0,120,0,   15,10,10,  -1,-1,-1,  0,
+         3, 1,    0,140,0,   15,10,10,  -1,-1,-1,  0,
+         4, 2,    0,160,0,    3, 3, 3,  -1,-1,-1,  0,
+         0, 3,    0,163,0,   10, 2, 0,   0,185,0,  0,
+
+         6, 0,   10,100,0,    7,35, 0,  -1,-1,-1,  0,
+         7, 5,   10, 50,0,    7,35, 0,  -1,-1,-1,  0,
+         0, 6,   10,  0,0,    5, 5, 8,  10, 0, 8,  0,
+         9, 2,   15,155,0,    5,21, 0,  -1,-1,-1,  90,
+        10, 8,   45,155,0,    5,21, 0,  -1,-1,-1,  90,
+         0, 9,   75,155,0,    6, 2, 0,  90,155,0,  90,
+
+        12, 0,  -10,100,0,    7,35, 0,  -1,-1,-1,  0,
+        13,11,  -10, 50,0,    7,35, 0,  -1,-1,-1,  0,
+         0,12,  -10,  0,0,    5, 5, 8,  -10,0, 8,  0,
+        15, 2,  -15,155,0,    5,21, 0,  -1,-1,-1,  90,
+        16,14,  -45,155,0,    5,21, 0,  -1,-1,-1,  90,
+         0,15,  -75,155,0,    6, 2, 0, -90,155,0,  90,
+    };
+
     self->aJointParentIndex_.clear();
     self->aAtRestOrigin_.clear();
+    self->isActive_ = true;
+    self->id_ = physics->getNumCollisionObjects();
 
     for (int i=0; i<countof(AF_DATA); i++)
     {
@@ -83,7 +138,8 @@ int loadAF(AF *self, btDynamicsWorld *physics)
             e = AF_DATA[i][4],
             f = AF_DATA[i][5],
             g = AF_DATA[i][6],
-            h = AF_DATA[i][7];
+            h = AF_DATA[i][7],
+            j = AF_DATA[i][11];
 
         int x = a ? AF_DATA[a][2] : AF_DATA[i][8],
             y = a ? AF_DATA[a][3] : AF_DATA[i][9],
@@ -99,7 +155,7 @@ int loadAF(AF *self, btDynamicsWorld *physics)
         xform.setIdentity();
         _dummy.setIdentity();
         xform.setOrigin(bodyOrigin);
-        if (i==8||i==9||i==10||i==14||i==15||i==16) xform.getBasis().setEulerYPR(SIMD_PI*0.5, 0, 0);
+        xform.getBasis().setEulerYPR(btRadians(j), 0, 0);
 
         float mass = 1.0;
         btVector3 inertia;
@@ -113,7 +169,7 @@ int loadAF(AF *self, btDynamicsWorld *physics)
 
         if (i)
         {
-            btRigidBody *rb2 = btRigidBody::upcast(physics->getCollisionObjectArray()[b + 1]);
+            btRigidBody *rb2 = btRigidBody::upcast(physics->getCollisionObjectArray()[self->id_ + b]);
             btTransform localA;
             btTransform localB;
             localA.setIdentity();
@@ -129,21 +185,37 @@ int loadAF(AF *self, btDynamicsWorld *physics)
             joint->setLimit(3,0,SIMD_PI*.25);
             joint->setLimit(4,0,SIMD_PI*.25);
             joint->setLimit(5,0,SIMD_PI*.15);
-            self->aConstraint_.push_back(joint);
         }
     }
-
     return 0;
 }
 
-void deactivateAF(AF *self)
+void deactivateAF(AF *self, const btDynamicsWorld * physics)
 {
     self->isActive_ = false;
-    btRigidBody const& rb1 = self->aConstraint_[0]->getRigidBodyB();
-    rb1.setActivationState(btRigidBody::CF_KINEMATIC_OBJECT);
-    for (int i=0; i<self->aConstraint_.size(); i++)
+    for (int i=0; i<17; i++)
     {
-        btRigidBody const& rb1 = self->aConstraint_[i]->getRigidBodyA();
-        rb1.setActivationState(btRigidBody::CF_KINEMATIC_OBJECT);
+        physics->getCollisionObjectArray()[i+self->id_]->
+                setActivationState(btRigidBody::CF_KINEMATIC_OBJECT);
     }
+}
+
+btVector3 solve(btVector3 p, float r1, float r2, btVector3 dir)
+{
+    btVector3 q = p*( 0.5f + 0.5f*(r1*r1-r2*r2)/btDot(p,p) );
+
+    float s = r1*r1 - btDot(q,q);
+    s = max( s, 0.0f );
+    q += sqrt(s)*btCross(p,dir).normalized();
+
+    return q;
+}
+
+void AFUpdatePose(myArray<btVector3> const& ikNode)
+{
+    float  l1, l2;
+    btVector3 b, c, d, v;
+    c = -d.normalized();
+    b = solve(c, l1, l2, v);
+    c = solve(d, l1, l2, v);
 }

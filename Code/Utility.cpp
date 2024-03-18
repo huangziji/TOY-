@@ -77,8 +77,11 @@ static int loadShaderS(int N, GLuint prog, const char *filename)
     return 0;
 }
 
+#include <time.h>
+
 static bool loadShaderD(int N, long *lastModTime, GLuint prog, const char *filename)
 {
+    const time_t stop = clock();
     struct stat libStat;
     int err = stat(filename, &libStat);
     if (err == 0 && *lastModTime != libStat.st_mtime)
@@ -86,7 +89,8 @@ static bool loadShaderD(int N, long *lastModTime, GLuint prog, const char *filen
         err = loadShaderS(N, prog, filename);
         if (err >= 0)
         {
-            printf("INFO: reloading file %s\n", filename);
+            const time_t elapseTime = (clock() - stop) / 1000;
+            printf("INFO: loaded file %s. It took %d ms\n", filename, elapseTime);
             *lastModTime = libStat.st_mtime;
             return true;
         }
@@ -110,6 +114,7 @@ void *loadPlugin(const char * filename)
     static void *handle = NULL;
     static void *f = NULL;
 
+    const time_t stop = clock();
     struct stat libStat;
     int err = stat(filename, &libStat);
     if (err == 0 && lastModTime != libStat.st_mtime)
@@ -121,7 +126,8 @@ void *loadPlugin(const char * filename)
         handle = dlopen(filename, RTLD_NOW);
         if (handle)
         {
-            printf("INFO: reloading file %s\n", filename);
+            const time_t elapseTime = (clock() - stop) / 1000;
+            printf("INFO: loaded file %s. It took %d ms\n", filename, elapseTime);
             lastModTime = libStat.st_mtime;
             f = dlsym(handle, "mainAnimation");
             assert(f);
@@ -136,6 +142,7 @@ void *loadPlugin(const char * filename)
 
 unsigned int loadTexture1(const char *filename)
 {
+    const time_t stop = clock();
     int w,h,c;
     stbi_uc *data = stbi_load(filename, &w,&h,&c, STBI_grey);
     if (!data)
@@ -150,5 +157,8 @@ unsigned int loadTexture1(const char *filename)
     glTexStorage2D(GL_TEXTURE_2D, 1, GL_R8, w,h);
     glTexSubImage2D(GL_TEXTURE_2D, 0,0,0,w,h, GL_RED, GL_UNSIGNED_BYTE, data);
     stbi_image_free(data);
+
+    const time_t elapseTime = (clock() - stop) / 1000;
+    printf("INFO: loaded file %s. It took %d ms\n", filename, elapseTime);
     return tex;
 }

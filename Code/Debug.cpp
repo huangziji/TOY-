@@ -1,45 +1,35 @@
 #include "Debug.h"
 
+#include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
+#include <time.h>
+
 #include <glm/glm.hpp>
 using namespace glm;
 
-myArray<float> &operator<<(myArray<float> &a, float b)
+inline myArray<int> &operator<<(myArray<int> &a, int b)
 {
     a.push_back(b);
     return a;
 }
 
-myArray<float> &operator,(myArray<float> &a, float b)
+inline myArray<int> &operator,(myArray<int> &a, int b)
 {
     return a << b;
 }
 
-myArray<float> &operator<<(myArray<float> &a, vec4 b)
+void myGui::drawRectangle(ivec4 const& dst, ivec4 const& src, int col, int texSlot)
 {
-    return a << b.x, b.y, b.z, b.w;
-}
-
-myArray<float> &operator,(myArray<float> &a, vec4 b)
-{
-    return a << b;
-}
-
-myArray<float> &operator<<(myArray<float> &a, mat4 b)
-{
-    return a << b[0], b[1], b[2], b[3];
-}
-
-void myGui::drawRectangle(const vec4 &dst, const vec4 &src, const vec4 &col, int texSlot)
-{
-    _quadBuffer << dst.x, dst.y, dst.z, dst.w,
-            src.x, src.y, src.z, src.w,
-            uintBitsToFloat(packUnorm4x8(col)), uintBitsToFloat(texSlot);
+    _quadBuffer <<
+            (dst.x | (dst.y << 16)), (dst.z | (dst.w << 16)),
+            (src.x | (src.y << 16)), (src.z | (src.w << 16)),
+            col, texSlot, 0,0;
 }
 
 bool myGui::loadFnt(const char *filename)
 {
+    const time_t stop = clock();
     FILE *file = fopen(filename, "r");
     if (!file)
     {
@@ -60,55 +50,44 @@ bool myGui::loadFnt(const char *filename)
         if (eof < 0) break;
         fseek(file, cur, SEEK_SET);
         fscanf(file, "%*[^\n]\n");
-
         _fntInfo[a] = { b,c,d,e,f,g,h };
     }
 
     fclose(file);
-    printf("INFO: loaded file %s\n", filename);
+    const time_t elapseTime = (clock()-stop) / 1000;
+    printf("INFO: loaded file %s. It took %d ms\n", filename, elapseTime);
     return true;
 }
 
-void myGui::draw2dText(const vec2 &location, float fntSize, const char *format...)
+void myGui::draw2dText(int posX, int posY, int col, int fntSize, const char *format...)
 {
-    const float spacing = .8;
-
     char textString[128];
     va_list args;
     va_start(args, format);
     vsprintf(textString, format, args);
     va_end(args);
 
+    const float spacing = 0;
     const int nChars = strlen(textString);
-    const int spaceWid = _fntInfo['_'].xadv;
-    fntSize /= spaceWid * 1.8;
+    const int charWid = _fntInfo['_'].xadv;
+    const int lineHei = charWid * 2;
 
-    vec2 pos = vec2(0);
-    for (int i=0; i<nChars; i++)
+    for (int x=0, y=0, i=0; i<nChars; i++)
     {
         int code = textString[i];
-
         if (code == '\n')
         {
-            pos.x = 0.;
-            pos.y += fntSize * spaceWid * 1.8 * spacing;
+            x = 0;
+            y += fntSize;
             continue;
         }
 
         Glyph g = _fntInfo[code];
-        vec4 src = vec4(g.xoff,g.yoff,g.w,g.h)*fntSize + vec4(pos + location, 0, 0);
-        drawRectangle(src, vec4(g.x,g.y,g.w,g.h), vec4(1,1,0,0), 0);
+        ivec4 dst = ivec4(g.xoff,g.yoff,g.w,g.h) * fntSize / lineHei
+                + ivec4(x + posX, y + posY, 0, 0);
+        drawRectangle(dst, ivec4(g.x,g.y,g.w,g.h), col, 0);
 
-        float xadv = code == ' ' ? spaceWid : g.xadv;
-        pos.x += fntSize * xadv * spacing;
+        int xadv = code == ' ' ? charWid : g.xadv;
+        x += xadv * fntSize / lineHei + spacing;
     }
 }
-
-void myDebugDraw::drawLine(const btVector3 &from, const btVector3 &to, const btVector3 &c)
-{
-    float col32 = uintBitsToFloat(packUnorm4x8(vec4(c.x(),c.y(),c.z(),0)));
-    _lineBuffer <<
-            from.x(), from.y(), from.z(), col32,
-            to.x(), to.y(), to.z(), col32;
-}
-

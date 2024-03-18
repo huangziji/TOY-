@@ -4,7 +4,7 @@ project(Toyxx)
 list(PREPEND CMAKE_PREFIX_PATH /home/edwde/.local/micromamba/envs/cxx)
 list(PREPEND CMAKE_LIBRARY_PATH /home/edwde/.local/micromamba/envs/cxx/lib)
 list(PREPEND CMAKE_INCLUDE_PATH /home/edwde/.local/micromamba/envs/cxx/include)
-list(PREPEND CMAKE_INCLUDE_PATH ../External/)
+list(PREPEND CMAKE_INCLUDE_PATH ../Extern/)
 list(PREPEND CMAKE_INCLUDE_PATH ../imgui-1.90.4/)
 list(PREPEND CMAKE_LIBRARY_PATH ${CMAKE_BINARY_DIR})
 include(../build/conan_toolchain.cmake)
@@ -24,7 +24,8 @@ add_executable(Toyxx
     ../Data/Bake3.glsl
     Utility.cpp
     Precompiled.cpp
-    Main.cpp)
+    Main.cpp
+Debug.cpp Debug.h)
 target_include_directories(Toyxx PRIVATE ${CMAKE_INCLUDE_PATH})
 target_link_directories(Toyxx PRIVATE ${CMAKE_LIBRARY_PATH})
 target_link_libraries(Toyxx PRIVATE
@@ -34,12 +35,7 @@ target_link_libraries(Toyxx PRIVATE
     BulletDynamics
     BulletCollision
     LinearMath
-    Toyxx_Common
 )
-add_library(Toyxx_Common Debug.cpp Debug.h)
-target_include_directories(Toyxx_Common PRIVATE ${CMAKE_INCLUDE_PATH})
-target_link_directories(Toyxx_Common PRIVATE ${CMAKE_LIBRARY_PATH})
-target_compile_options(Toyxx_Common PRIVATE -fPIC)
 
 add_library(Toyxx_Plugin SHARED Plugin.cpp AF.cpp AF.h Database.cpp)
 target_include_directories(Toyxx_Plugin PRIVATE ${CMAKE_INCLUDE_PATH})
@@ -49,7 +45,6 @@ target_link_libraries(Toyxx_Plugin PRIVATE
     BulletDynamics
     BulletCollision
     LinearMath
-    Toyxx_Common
     OpenFBX
     miniz
 )

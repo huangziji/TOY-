@@ -71,24 +71,42 @@ bool loadShader3(long *lastMod, GLuint prog, const char *filename)
     return true;
 }
 
+#include <btBulletDynamicsCommon.h>
+#include <cgltf.h>
+
+static cgltf_data *load_cgltf(const char *filename)
+{
+    btClock stop;
+    cgltf_data* data = NULL;
+    cgltf_options options = {};
+    cgltf_result result;
+
+    result = cgltf_parse_file(&options, filename, &data);
+    if (result != cgltf_result_success) {
+        return 0;
+    }
+    result = cgltf_load_buffers(&options, data, filename);
+    if (result != cgltf_result_success) {
+        cgltf_free(data);
+        return 0;
+    }
+    result = cgltf_validate(data);
+    if (result != cgltf_result_success) {
+        cgltf_free(data);
+        return 0;
+    }
+
+    printf("INFO: loaded file %s. It took %d ms\n", filename, stop.getTimeMilliseconds());
+    return data;
+}
+
 static void error_callback(int _, const char* desc)
 {
     fprintf(stderr, "ERROR: %s\n", desc);
 }
 
-#include <btBulletDynamicsCommon.h>
-
 int main()
 {
-    myDebugDraw dd;
-    myGui gui;
-    gui.loadFnt("../Data/arial.fnt");
-    btCollisionConfiguration *conf = new btDefaultCollisionConfiguration;
-    btDynamicsWorld *physics = new btDiscreteDynamicsWorld(
-                new btCollisionDispatcher(conf), new btDbvtBroadphase,
-                new btSequentialImpulseConstraintSolver, conf);
-    physics->setDebugDrawer(&dd);
-
     glfwInit();
     glfwSetErrorCallback(error_callback);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -116,6 +134,7 @@ int main()
         glGenTextures(1, &tex5);
         glBindTexture(GL_TEXTURE_2D, tex5);
         glTexStorage2D(GL_TEXTURE_2D, 1, GL_R8, size, size);
+        // glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, size, size, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
         glGenFramebuffers(1, &bufferA);
         glBindFramebuffer(GL_FRAMEBUFFER, bufferA);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex5, 0);
@@ -127,6 +146,7 @@ int main()
     GLuint vbo2; glGenBuffers(1, &vbo2);
     GLuint ubo1; glGenBuffers(1, &ubo1);
     GLuint ssbo1; glGenBuffers(1, &ssbo1);
+    myGui gui; gui.loadFnt("../Data/arial.fnt");
     const GLuint tex4 = loadTexture1("../Data/arial.bmp");
 
     while (!glfwWindowShouldClose(window1))
@@ -144,30 +164,26 @@ int main()
         lastFrameTime = iTime;
         iFrame += 1;
 
-        if (iFrame == 0)
-        {
-            IMGUI_CHECKVERSION();
-            ImGui::CreateContext();
-            ImGuiIO& io = ImGui::GetIO(); (void)io;
-            ImGui_ImplGlfw_InitForOpenGL(window1, true);
-            ImGui_ImplOpenGL3_Init("#version 130");
-        }
+        static btCollisionConfiguration *conf = new btDefaultCollisionConfiguration;
+        static btDynamicsWorld *physics = new btDiscreteDynamicsWorld(
+                    new btCollisionDispatcher(conf), new btDbvtBroadphase,
+                    new btSequentialImpulseConstraintSolver, conf);
 
-        static float fps = 0; if ((iFrame & 0xf) == 0) fps = 1. / iTimeDelta;
-        gui.clearQuads();
-        // gui.drawRectangle({ iResolutionX*.5-iResolutionY*.5,0,iResolutionY,iResolutionY },
-                          // { 0, 0, iResolutionY, iResolutionY }, { 1,1,1,0 });
-        gui.draw2dText(vec2(iResolutionX, iResolutionY) * vec2(.15,.9), 20,
-            "%.2f   %.1f fps   %dx%d", iTime, fps, iResolutionX, iResolutionY);
-
-        typedef struct { myArray<float> U1, W1; }Output;
+        typedef struct { myArray<float> U1,W1,V2; }Output;
         Output out;
         typedef void (plugin)(Output *, btDynamicsWorld *, float, float);
-        void *f = loadPlugin("libToyxx_Plugin.so");
+        void *f = loadPlugin("./libToyxx_Plugin.so");
         if (f) ((plugin*)f)(&out, physics, iTime, iTimeDelta);
 
-        myArray<float> const& V1 = gui.getQuadBuffer();
-        myArray<float> const& V2 = dd.getLineBuffer();
+        gui.clearQuads();
+        static float fps = 0; if ((iFrame & 0xf) == 0) fps = 1. / iTimeDelta;
+        gui.draw2dText(iResolutionX*.15, iResolutionY*.9, 0xFF7FFFFF, 20,
+            "%.2f   %.1f fps   %dx%d", iTime, fps, iResolutionX, iResolutionY);
+        gui.drawRectangle({ iResolutionX*.1, iResolutionY*.9, iResolutionY*.05,iResolutionY*.05 },
+                          { 0, 0, iResolutionY*.5, iResolutionY*.5 }, 0xFF7FFFFF);
+
+        myArray<int> const& V1 = gui.Data();
+        myArray<float> const& V2 = out.V2;
         myArray<float> const& U1 = out.U1;
         myArray<float> const& W1 = out.W1;
 
@@ -175,13 +191,10 @@ int main()
         glBufferData(GL_ARRAY_BUFFER, sizeof V1[0] * V1.size(), &V1[0], GL_DYNAMIC_DRAW);
         glEnableVertexAttribArray(1);
         glEnableVertexAttribArray(2);
-        glEnableVertexAttribArray(3);
-        glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 40, 0);
-        glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, 40, (void*)16);
-        glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, 40, (void*)32);
+        glVertexAttribIPointer(1, 4, GL_INT, 32, 0);
+        glVertexAttribIPointer(2, 4, GL_INT, 32, (void*)16);
         glVertexAttribDivisor(1, 1);
         glVertexAttribDivisor(2, 1);
-        glVertexAttribDivisor(3, 1);
 
         glBindBuffer(GL_ARRAY_BUFFER, vbo2);
         glBufferData(GL_ARRAY_BUFFER, sizeof V2[0] * V2.size(), &V2[0], GL_DYNAMIC_DRAW);
@@ -256,6 +269,14 @@ int main()
         glUseProgram(prog3);
         glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, V1.size()/8);
 
+        if (iFrame == 0)
+        {
+            IMGUI_CHECKVERSION();
+            ImGui::CreateContext();
+            ImGuiIO& io = ImGui::GetIO(); (void)io;
+            ImGui_ImplGlfw_InitForOpenGL(window1, true);
+            ImGui_ImplOpenGL3_Init("#version 130");
+        }
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();

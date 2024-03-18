@@ -3,14 +3,16 @@
 #include <ofbx.h>
 #include <LinearMath/btQuickprof.h>
 #include <LinearMath/btHashMap.h>
-#include <LinearMath/btVector3.h>
+#include <LinearMath/btTransform.h>
 using namespace ofbx;
+template<class T> using myArray = btAlignedObjectArray<T>;
 
 struct IkRigNode
 {
-    btVector3 world, local; float length;
+    btVector3 world, local;
+    float length;
 
-    btVector3 GetScaledT(IkRigNode const& other) const
+    btVector3 GetNormalizedT(IkRigNode const& other) const
     {
         btVector3 t = (world - other.world) / (length - other.length);
         btVector3 s = local.cross(t).normalized();
@@ -79,15 +81,13 @@ static void SamplePoseRecursive(btHashMap<btHashString, IkRigNode> * out,
 
 const IScene * loadFbx(const char *filename)
 {
+    btClock stop;
     FILE *f = fopen(filename, "rb");
     if (!f)
     {
         fprintf(stderr, "ERROR: file %s not found.\n", filename);
         return NULL;
     }
-
-    btClock stop;
-    stop.reset();
 
     fseek(f, 0, SEEK_END);
     long length = ftell(f);
@@ -99,13 +99,12 @@ const IScene * loadFbx(const char *filename)
     IScene *fbxScene = load(data, length, 0);
     const char *err = getError();
     if (strlen(err)) fprintf(stderr, "ERROR: %s\n", err);
-    unsigned long long elapsedTime = stop.getTimeMilliseconds();
-    printf("INFO: loaded file %s. It took %ld ms\n", filename, elapsedTime);
 
+    printf("INFO: loaded file %s. It took %ld ms\n", filename, stop.getTimeMilliseconds());
     return fbxScene;
 }
 
-void SamplePose(float t, const IScene *scene)
+myArray<btVector3> SamplePose(float t, const IScene *scene)
 {
     static const char *KEYWORDS[] = {
         "mixamorig:Hips",
@@ -142,19 +141,34 @@ void SamplePose(float t, const IScene *scene)
     const IkRigNode * rightUpLeg = out.find(KEYWORDS[9]);
     const IkRigNode * rightShoulder = out.find(KEYWORDS[10]);
 
-    btVector3 a = neck->GetScaledT({});
-    btVector3 b = neck->GetScaledT(*hips);
-    btVector3 c = head->GetScaledT(*neck);
-    btVector3 d = leftFoot->GetScaledT(*leftUpLeg);
-    btVector3 e = leftHand->GetScaledT(*leftShoulder);
-    btVector3 f = rightFoot->GetScaledT(*rightUpLeg);
-    btVector3 g = rightHand->GetScaledT(*rightShoulder);
+    btVector3 a = neck->GetNormalizedT({});
+    btVector3 b = neck->GetNormalizedT(*hips);
+    btVector3 c = head->GetNormalizedT(*neck);
+    btVector3 d = leftFoot->GetNormalizedT(*leftUpLeg);
+    btVector3 e = leftHand->GetNormalizedT(*leftShoulder);
+    btVector3 f = rightFoot->GetNormalizedT(*rightUpLeg);
+    btVector3 g = rightHand->GetNormalizedT(*rightShoulder);
     btVector3 h = neck->local.cross(b).normalized();
     btVector3 i = head->local.cross(c).normalized();
     btVector3 j = leftFoot->local.cross(d).normalized();
     btVector3 k = leftHand->local.cross(e).normalized();
     btVector3 l = rightFoot->local.cross(f).normalized();
     btVector3 m = rightHand->local.cross(g).normalized();
+    myArray<btVector3> res;
+    res.push_back(a);
+    res.push_back(b);
+    res.push_back(c);
+    res.push_back(d);
+    res.push_back(e);
+    res.push_back(f);
+    res.push_back(g);
+    res.push_back(h);
+    res.push_back(i);
+    res.push_back(j);
+    res.push_back(k);
+    res.push_back(l);
+    res.push_back(m);
+    return res;
 }
 
 float GetAnimDuration(const IScene *scene)

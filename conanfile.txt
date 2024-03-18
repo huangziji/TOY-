@@ -1,6 +1,7 @@
 [requires]
 bullet3/3.25
 openfbx/cci.20210426
+meshoptimizer/0.20
 
 [generators]
 CMakeDeps
