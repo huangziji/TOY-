@@ -1,9 +1,14 @@
 #include "AF.h"
-#include <sys/stat.h>
 #include <btBulletDynamicsCommon.h>
 #include <glm/glm.hpp>
-template <typename T> using myArray = btAlignedObjectArray<T>;
 using namespace glm;
+
+void myDebugDraw::drawLine(const btVector3& from, const btVector3& to, const btVector3& c)
+{
+    float code =  uintBitsToFloat(packUnorm4x8(vec4(c.x(),c.y(),c.z(),0)));
+    lineBuffer_ << from[0], from[1], from[2], code,
+            to[0], to[1], to[2], code;
+}
 
 myArray<float> &operator<<(myArray<float> &a, float b)
 {
@@ -16,22 +21,7 @@ myArray<float> &operator,(myArray<float> &a, float b)
     return a << b;
 }
 
-myArray<float> &operator<<(myArray<float> &a, vec4 b)
-{
-    return a << b.x, b.y, b.z, b.w;
-}
-
-myArray<float> &operator,(myArray<float> &a, vec4 b)
-{
-    return a << b;
-}
-
-myArray<float> &operator<<(myArray<float> &a, mat4 b)
-{
-    return a << b[0], b[1], b[2], b[3];
-}
-
-void Clear(btDynamicsWorld *physics)
+void ClearWorld(btDynamicsWorld *physics)
 {
     for (int i = physics->getNumConstraints() - 1; i >= 0; i--)
     {
@@ -55,54 +45,70 @@ void Clear(btDynamicsWorld *physics)
     }
 }
 
-mat4 drawPrimitive( vec3 origin, mat3 axis, vec3 halfExtend, int shapeType )
+void drawRigidBody( myArray<float> & a, btCollisionObject const& rb )
 {
-    mat4 data = axis;
-    data[0][3] = origin.x, data[1][3] = origin.y, data[2][3] = origin.z;
-    data[3] = vec4(halfExtend, intBitsToFloat(shapeType));
-    return data;
-}
-
-mat4 drawRigidBody( btCollisionObject const& rb )
-{
-    vec3 h;
     int shapeType;
+    btVector3 halfExtents;
     switch (rb.getCollisionShape()->getShapeType())
     {
     case STATIC_PLANE_PROXYTYPE:
-    {
-        h.x = -dynamic_cast<const btStaticPlaneShape*>(rb.getCollisionShape())->getPlaneConstant();
-        shapeType = 3;
+        shapeType = 0,
+        halfExtents[0] = ((btStaticPlaneShape*)rb.getCollisionShape())->getPlaneConstant();
         break;
-    }
     case BOX_SHAPE_PROXYTYPE:
-    {
-        btVector3 halfExtents = dynamic_cast<const btBoxShape*>(rb.getCollisionShape())->getHalfExtentsWithMargin();
-        h.x = halfExtents.x();
-        h.y = halfExtents.y();
-        h.z = halfExtents.z();
-        shapeType = 1;
+        shapeType = 1,
+        halfExtents = ((btBoxShape*)rb.getCollisionShape())->getHalfExtentsWithoutMargin();
         break;
-    }
+    case SPHERE_SHAPE_PROXYTYPE:
+        shapeType = 2,
+        halfExtents[0] = ((btCapsuleShape*)rb.getCollisionShape())->getRadius();
+        break;
     case CAPSULE_SHAPE_PROXYTYPE:
-        h.x = dynamic_cast<const btCapsuleShape*>(rb.getCollisionShape())->getHalfHeight();
-        h.y = dynamic_cast<const btCapsuleShape*>(rb.getCollisionShape())->getRadius();
-        shapeType = 2;
+        shapeType = 3,
+        halfExtents[0] = ((btCapsuleShape*)rb.getCollisionShape())->getRadius(),
+        halfExtents[1] = ((btCapsuleShape*)rb.getCollisionShape())->getHalfHeight();
         break;
     }
 
     btVector3 origin = rb.getWorldTransform().getOrigin();
-    btMatrix3x3 axis = rb.getWorldTransform().getBasis().transpose();
-    return drawPrimitive(vec3(origin[0], origin[1], origin[2]),
-        mat3( axis[0][0], axis[0][1], axis[0][2],
-              axis[1][0], axis[1][1], axis[1][2],
-              axis[2][0], axis[2][1], axis[2][2] ),
-        h, shapeType);
+    btMatrix3x3 axis = rb.getWorldTransform().getBasis();
+    a << axis[0][0], axis[0][1], axis[0][2], halfExtents[0],
+        axis[1][0], axis[1][1], axis[1][2], halfExtents[1],
+        axis[2][0], axis[2][1], axis[2][2], halfExtents[2],
+        origin[0], origin[1], origin[2], intBitsToFloat(shapeType);
 }
 
-int loadAF(AF *self, btDynamicsWorld *physics)
+btRigidBody *createRigidBody(btVector3 origin, btVector3 bounds)
 {
-    const int AF_DATA[][12] = {
+    float rz = 0;
+    int shapeType = BOX_SHAPE_PROXYTYPE;
+    btCollisionShape *shape = NULL;
+    switch (shapeType) {
+    case BOX_SHAPE_PROXYTYPE:
+        shape = new btBoxShape(bounds);
+        break;
+    case CAPSULE_SHAPE_PROXYTYPE:
+        shape = new btCapsuleShape(bounds[0], bounds[1]);
+        break;
+    }
+
+    float mass = 1.0;
+    btVector3 inertia;
+    shape->calculateLocalInertia(mass, inertia);
+    btRigidBody *rb = new btRigidBody(btRigidBody::btRigidBodyConstructionInfo(
+        mass, NULL, shape, inertia));
+    btTransform x;
+    x.setIdentity();
+    x.setOrigin(origin);
+    x.getBasis().setEulerZYX(0,0,rz);
+    rb->setWorldTransform(x);
+    rb->setActivationState(btRigidBody::CF_KINEMATIC_OBJECT);
+    return rb;
+}
+
+void AF::Load(btDynamicsWorld *physics)
+{
+    const int X[][12] = {
          1,-1,    0,100,0,   15,10,10,  -1,-1,-1,  0,
          2, 0,    0,120,0,   15,10,10,  -1,-1,-1,  0,
          3, 1,    0,140,0,   15,10,10,  -1,-1,-1,  0,
@@ -124,79 +130,69 @@ int loadAF(AF *self, btDynamicsWorld *physics)
          0,15,  -75,155,0,    6, 2, 0, -90,155,0,  90,
     };
 
-    self->aJointParentIndex_.clear();
-    self->aAtRestOrigin_.clear();
-    self->isActive_ = true;
-    self->id_ = physics->getNumCollisionObjects();
+    isActive_ = false;
+    id_ = physics->getNumCollisionObjects();
+    aJointOrigin_.clear();
 
-    for (int i=0; i<countof(AF_DATA); i++)
+    for (int i=0; i<countof(X); i++)
     {
-        int a = AF_DATA[i][0],
-            b = AF_DATA[i][1],
-            c = AF_DATA[i][2],
-            d = AF_DATA[i][3],
-            e = AF_DATA[i][4],
-            f = AF_DATA[i][5],
-            g = AF_DATA[i][6],
-            h = AF_DATA[i][7],
-            j = AF_DATA[i][11];
-
-        int x = a ? AF_DATA[a][2] : AF_DATA[i][8],
-            y = a ? AF_DATA[a][3] : AF_DATA[i][9],
-            z = a ? AF_DATA[a][4] : AF_DATA[i][10];
+        int a = X[i][0], b = X[i][1], c = X[i][2],
+            d = X[i][3], e = X[i][4], f = X[i][5],
+            g = X[i][6], h = X[i][7], j = X[i][11],
+            k = a ? X[a][2] : X[i][8],
+            l = a ? X[a][3] : X[i][9],
+            m = a ? X[a][4] : X[i][10];
 
         bool isBox = h > 0;
         btVector3 bounds = btVector3(f,g,h) * 0.01f;
         btVector3 jointOrigin1 = btVector3(c,d,e) * 0.01f;
-        btVector3 jointOrigin2 = btVector3(x,y,z) * 0.01f;
+        btVector3 jointOrigin2 = btVector3(k,l,m) * 0.01f;
         btVector3 bodyOrigin = (jointOrigin1 + jointOrigin2) * 0.5f;
 
-        btTransform xform, _dummy;
-        xform.setIdentity();
-        _dummy.setIdentity();
-        xform.setOrigin(bodyOrigin);
-        xform.getBasis().setEulerYPR(btRadians(j), 0, 0);
-
-        float mass = 1.0;
-        btVector3 inertia;
         btCollisionShape *shape = isBox ?
             (btCollisionShape *)new btBoxShape(bounds) :
             (btCollisionShape *)new btCapsuleShape(bounds.x(), bounds.y());
+        float mass = 1.0;
+        btVector3 inertia;
         shape->calculateLocalInertia(mass, inertia);
         btRigidBody *rb1 = new btRigidBody(btRigidBody::btRigidBodyConstructionInfo(
-            mass, new btDefaultMotionState(xform, _dummy), shape, inertia));
+            mass, NULL, shape, inertia));
+        btTransform x;
+        x.setIdentity();
+        x.setOrigin(bodyOrigin);
+        x.getBasis().setEulerZYX(0, 0, btRadians(j));
+        rb1->setWorldTransform(x);
+        rb1->setActivationState(btRigidBody::CF_KINEMATIC_OBJECT);
         physics->addRigidBody(rb1);
 
         if (i)
         {
-            btRigidBody *rb2 = btRigidBody::upcast(physics->getCollisionObjectArray()[self->id_ + b]);
+            btRigidBody *rb2 = btRigidBody::upcast(physics->getCollisionObjectArray()[id_ + b]);
             btTransform localA;
             btTransform localB;
             localA.setIdentity();
             localB.setIdentity();
-            localA.setOrigin( rb1->getWorldTransform().inverse() * jointOrigin1 );
-            localB.setOrigin( rb2->getWorldTransform().inverse() * jointOrigin1 );
+            localA.setOrigin( rb1->getWorldTransform().invXform(jointOrigin1) );
+            localB.setOrigin( rb2->getWorldTransform().invXform(jointOrigin1) );
             btGeneric6DofConstraint *joint = new btGeneric6DofConstraint(
                         *rb1, *rb2, localA, localB, false);
-            physics->addConstraint(joint, true);
             joint->setLimit(0,0,0);
             joint->setLimit(1,0,0);
             joint->setLimit(2,0,0);
             joint->setLimit(3,0,SIMD_PI*.25);
             joint->setLimit(4,0,SIMD_PI*.25);
             joint->setLimit(5,0,SIMD_PI*.15);
+            physics->addConstraint(joint, true);
         }
     }
-    return 0;
 }
 
-void deactivateAF(AF *self, const btDynamicsWorld * physics)
+void AF::Activate(const btDynamicsWorld * physics)
 {
-    self->isActive_ = false;
+    isActive_ = true;
     for (int i=0; i<17; i++)
     {
-        physics->getCollisionObjectArray()[i+self->id_]->
-                setActivationState(btRigidBody::CF_KINEMATIC_OBJECT);
+        btRigidBody::upcast(physics->getCollisionObjectArray()[i+id_])->activate();
     }
 }
 
@@ -205,17 +201,46 @@ btVector3 solve(btVector3 p, float r1, float r2, btVector3 dir)
     btVector3 q = p*( 0.5f + 0.5f*(r1*r1-r2*r2)/btDot(p,p) );
 
     float s = r1*r1 - btDot(q,q);
-    s = max( s, 0.0f );
-    q += sqrt(s)*btCross(p,dir).normalized();
+    s = btMax( s, 0.0f );
+    q += sqrt(s)*p.cross(dir).normalized();
 
     return q;
 }
 
-void AFUpdatePose(myArray<btVector3> const& ikNode)
+struct IkRigNode
 {
-    float  l1, l2;
-    btVector3 b, c, d, v;
-    c = -d.normalized();
-    b = solve(c, l1, l2, v);
-    c = solve(d, l1, l2, v);
+    btMatrix3x3 tipAxis;
+    btVector3 tipOrigin, axisDir;
+    float length;
+
+    bool SolveSpine(btVector3 & b, btVector3 & c, float l1, float l2, float l3);
+};
+
+bool IkRigNode::SolveSpine(btVector3 & b, btVector3 & c, float l1, float l2, float l3)
+{
+    c = - tipOrigin.normalized();
+    b = solve(c, l1, l2, axisDir);
+    c = solve(tipOrigin, l2, l3, axisDir);
+    return true;
+}
+
+void AF::UpdatePose()
+{
+    btVector3 b, c;
+    btTransform hipsXform;
+    IkRigNode spineNode;
+
+    aJointOrigin_[0] = hipsXform.getOrigin();
+    aJointOrigin_[1] = hipsXform.getOrigin() + b;
+    aJointOrigin_[2] = hipsXform.getOrigin() + c;
+    aJointOrigin_[3] = hipsXform.getOrigin() + spineNode.tipOrigin;
+
+    btVector3 d = spineNode.tipOrigin;
+
+    myArray<btMatrix3x3> aJointAxisMod_;
+    myArray<btVector3> aJointOriginLocal_;
+    aJointAxisMod_[0] = hipsXform.getBasis();
+    aJointAxisMod_[1] = btMatrix3x3(shortestArcQuat(b, aJointOriginLocal_[1]));
+    aJointAxisMod_[2] = btMatrix3x3(shortestArcQuat(c-b, aJointOriginLocal_[2]));
+    aJointAxisMod_[3] = btMatrix3x3(shortestArcQuat(d-c, aJointOriginLocal_[3]));
 }

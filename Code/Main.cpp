@@ -1,10 +1,11 @@
-#include "Debug.h"
-
 #include <stdio.h>
+#include <sys/stat.h>
+#include <time.h>
+
 #include <GLFW/glfw3.h>
 #include <glad/glad.h>
-#include <glm/glm.hpp>
-using namespace glm;
+#include <LinearMath/btAlignedObjectArray.h>
+template <typename T> using myArray = btAlignedObjectArray<T>;
 
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
@@ -12,63 +13,112 @@ using namespace glm;
 
 bool loadShader1(long *lastMod, GLuint prog, const char *filename);
 bool loadShader2(long *lastMod, GLuint prog, const char *filename);
+bool loadShader3(long *lastMod, GLuint prog, const char *filename);
 void *loadPlugin(const char *filename);
 GLuint loadTexture1(const char *filename);
+bool screenRecording();
 
-#include <sys/stat.h>
+typedef struct {int x,y,z,w; }int4;
+int4 Int4(int x, int y, int z, int w) { return { x,y,z,w }; }
 
-bool loadShader3(long *lastMod, GLuint prog, const char *filename)
+class myGui
 {
-    struct stat libStat;
-    int err = stat(filename, &libStat);
-    if (err || *lastMod == libStat.st_mtime)
+    typedef struct{ int x,y,w,h,xoff,yoff,xadv; }Glyph;
+    myArray<Glyph> _fntInfo;
+    myArray<int> _quadBuffer;
+public:
+    myArray<int> const& Data() const { return _quadBuffer; }
+    void clearQuads() { _quadBuffer.clear(); }
+    bool loadFnt(const char *filename);
+    void draw2dText(int posX, int posY, int col, int fntSize, const char *fmt...);
+    void drawRectangle(int4 const& dst, int4 const& src, int col, int texSlot = 1);
+};
+
+myArray<int> &operator<<(myArray<int> &a, int b)
+{
+    a.push_back(b);
+    return a;
+}
+
+myArray<int> &operator,(myArray<int> &a, int b)
+{
+    return a << b;
+}
+
+void myGui::drawRectangle(int4 const& dst, int4 const& src, int col, int texSlot)
+{
+    _quadBuffer <<
+            (dst.x | (dst.y << 16)), (dst.z | (dst.w << 16)),
+            (src.x | (src.y << 16)), (src.z | (src.w << 16)),
+            col, texSlot;
+}
+
+bool myGui::loadFnt(const char *filename)
+{
+    const time_t stop = clock();
+    FILE *file = fopen(filename, "r");
+    if (!file)
     {
+        fprintf(stderr, "ERROR: file %s not found.\n", filename);
         return false;
     }
 
-    printf("INFO: reloading file %s\n", filename);
-    *lastMod = libStat.st_mtime;
-
-    FILE *f = fopen(filename, "r");
-    assert(f);
-    fseek(f, 0, SEEK_END);
-    long length = ftell(f);
-    rewind(f);
-    char source[length+1]; source[length] = 0; // set null terminator
-    fread(source, length, 1, f);
-    fclose(f);
-
-    const char *string[] = { source };
-    GLuint cs = glCreateShader(GL_COMPUTE_SHADER);
-    glShaderSource(cs, 1, string, NULL);
-    glCompileShader(cs);
-    int success;
-    glGetShaderiv(cs, GL_COMPILE_STATUS, &success);
-    if (!success)
+    _fntInfo.resize(128);
+    const char *format =
+            "%*[^=]=%d%*[^=]=%d%*[^=]=%d%*[^=]=%d"
+            "%*[^=]=%d%*[^=]=%d%*[^=]=%d%*[^=]=%d";
+    fscanf(file, "%*[^\n]\n%*[^\n]\n%*[^\n]\n%*[^\n]\n");
+    for (;;)
     {
-        int length;
-        glGetShaderiv(cs, GL_INFO_LOG_LENGTH, &length);
-        char message[length];
-        glGetShaderInfoLog(cs, length, &length, message);
-        glDeleteShader(cs);
-        fprintf(stderr, "ERROR: fail to compile compute shader. file %s\n%s\n",
-                filename, message);
-        return true;
+        long cur = ftell(file);
+        int a,b,c,d,e,f,g,h;
+        int eof = fscanf(file, format, &a,&b,&c,&d,&e,&f,&g,&h);
+        if (eof < 0) break;
+        fseek(file, cur, SEEK_SET);
+        fscanf(file, "%*[^\n]\n");
+        _fntInfo[a] = { b,c,d,e,f,g,h };
     }
 
-    GLsizei NbShaders;
-    GLuint oldShader;
-    glGetAttachedShaders(prog, 1, &NbShaders, &oldShader);
-    if (NbShaders)
-    {
-        glDetachShader(prog, oldShader);
-        glDeleteShader(oldShader);
-    }
-
-    glAttachShader(prog, cs);
-    glLinkProgram(prog);
-    glValidateProgram(prog);
+    fclose(file);
+    const time_t elapseTime = (clock()-stop) / 1000;
+    printf("INFO: loaded file %s. It took %d ms\n", filename, elapseTime);
     return true;
+}
+
+void myGui::draw2dText(int posX, int posY, int col, int fntSize, const char *format...)
+{
+    char textString[128];
+    va_list args;
+    va_start(args, format);
+    vsprintf(textString, format, args);
+    va_end(args);
+
+    const float spacing = 0;
+    const int nChars = strlen(textString);
+    const int charWid = _fntInfo['_'].xadv;
+    const int lineHei = charWid * 2;
+
+    for (int x=0, y=0, i=0; i<nChars; i++)
+    {
+        int code = textString[i];
+        if (code == '\n')
+        {
+            x = 0;
+            y += fntSize;
+            continue;
+        }
+
+        Glyph g = _fntInfo[code];
+        int4 dst = {
+            g.xoff * fntSize / lineHei + x + posX,
+            g.yoff * fntSize / lineHei + y + posY,
+            g.w * fntSize / lineHei,
+            g.h * fntSize / lineHei, };
+        drawRectangle(dst, { g.x,g.y,g.w,g.h }, col, 0);
+
+        int xadv = code == ' ' ? charWid : g.xadv;
+        x += xadv * fntSize / lineHei + spacing;
+    }
 }
 
 #include <btBulletDynamicsCommon.h>
@@ -76,7 +126,7 @@ bool loadShader3(long *lastMod, GLuint prog, const char *filename)
 
 static cgltf_data *load_cgltf(const char *filename)
 {
-    btClock stop;
+    const time_t stop = clock();
     cgltf_data* data = NULL;
     cgltf_options options = {};
     cgltf_result result;
@@ -96,7 +146,8 @@ static cgltf_data *load_cgltf(const char *filename)
         return 0;
     }
 
-    printf("INFO: loaded file %s. It took %d ms\n", filename, stop.getTimeMilliseconds());
+    const time_t elapseTime = (clock() - stop) / 1000;
+    printf("INFO: loaded file %s. It took %d ms\n", filename, elapseTime);
     return data;
 }
 
@@ -130,22 +181,24 @@ int main()
 
     GLuint bufferA, tex5;
     {
-        const int size = 9*50;
+        const int size = 450;
         glGenTextures(1, &tex5);
         glBindTexture(GL_TEXTURE_2D, tex5);
         glTexStorage2D(GL_TEXTURE_2D, 1, GL_R8, size, size);
-        // glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, size, size, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
         glGenFramebuffers(1, &bufferA);
         glBindFramebuffer(GL_FRAMEBUFFER, bufferA);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex5, 0);
         glDrawBuffer(GL_COLOR_ATTACHMENT0);
         glReadBuffer(GL_NONE);
+        // glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, newSize, newSize, 0, GL_RED, GL_UNSIGNED_BYTE, NULL);
     }
 
     GLuint vbo1; glGenBuffers(1, &vbo1);
     GLuint vbo2; glGenBuffers(1, &vbo2);
     GLuint ubo1; glGenBuffers(1, &ubo1);
     GLuint ssbo1; glGenBuffers(1, &ssbo1);
+    GLuint vbo3; glGenBuffers(1, &vbo3);
+    GLuint abo1; glGenBuffers(1, &abo1);
     myGui gui; gui.loadFnt("../Data/arial.fnt");
     const GLuint tex4 = loadTexture1("../Data/arial.bmp");
 
@@ -179,8 +232,8 @@ int main()
         static float fps = 0; if ((iFrame & 0xf) == 0) fps = 1. / iTimeDelta;
         gui.draw2dText(iResolutionX*.15, iResolutionY*.9, 0xFF7FFFFF, 20,
             "%.2f   %.1f fps   %dx%d", iTime, fps, iResolutionX, iResolutionY);
-        gui.drawRectangle({ iResolutionX*.1, iResolutionY*.9, iResolutionY*.05,iResolutionY*.05 },
-                          { 0, 0, iResolutionY*.5, iResolutionY*.5 }, 0xFF7FFFFF);
+        gui.drawRectangle(Int4( iResolutionX*.1, iResolutionY*.9, iResolutionY*.05,iResolutionY*.05 ),
+                          Int4( 0, 0, iResolutionY*.5, iResolutionY*.5 ), 0xFF7FFFFF);
 
         myArray<int> const& V1 = gui.Data();
         myArray<float> const& V2 = out.V2;
@@ -191,8 +244,8 @@ int main()
         glBufferData(GL_ARRAY_BUFFER, sizeof V1[0] * V1.size(), &V1[0], GL_DYNAMIC_DRAW);
         glEnableVertexAttribArray(1);
         glEnableVertexAttribArray(2);
-        glVertexAttribIPointer(1, 4, GL_INT, 32, 0);
-        glVertexAttribIPointer(2, 4, GL_INT, 32, (void*)16);
+        glVertexAttribIPointer(1, 4, GL_INT, 24, 0);
+        glVertexAttribIPointer(2, 2, GL_INT, 24, (void*)16);
         glVertexAttribDivisor(1, 1);
         glVertexAttribDivisor(2, 1);
 
@@ -203,18 +256,18 @@ int main()
 
         glBindBuffer(GL_UNIFORM_BUFFER, ubo1);
         glBufferData(GL_UNIFORM_BUFFER, sizeof U1[0] * U1.size(), &U1[0], GL_DYNAMIC_COPY);
-        glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo1);
+        glBindBufferBase(GL_UNIFORM_BUFFER, 1, ubo1);
 
         glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo1);
         glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof W1[0] * W1.size(), &W1[0], GL_DYNAMIC_COPY);
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, ssbo1);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ssbo1);
 
         static long lastMod4;
         static const GLuint prog4 = glCreateProgram();
         bool dirty = loadShader1(&lastMod4, prog4, "../Data/Bake2.frag");
         if (dirty)
         {
-            const int size = iResolutionY;
+            const int size = 450;
             glDepthMask(0);
             glDisable(GL_BLEND);
             glDisable(GL_DEPTH_TEST);
@@ -225,6 +278,27 @@ int main()
             glProgramUniform2f(prog4, 0, size, size);
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
         }
+
+        static long lastMod5;
+        static const GLuint prog5 = glCreateProgram();
+        dirty = loadShader3(&lastMod5, prog5, "../Data/Bake3.glsl");
+        if (dirty)
+        {
+            const int resX = 64, resY = 64, resZ = 64, length = 0;
+            glBindBuffer(GL_SHADER_STORAGE_BUFFER, vbo3);
+            glBufferData(GL_SHADER_STORAGE_BUFFER, 512, NULL, GL_STATIC_DRAW);
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, vbo3);
+            glBindBuffer(GL_ATOMIC_COUNTER_BUFFER, abo1);
+            glBufferData(GL_ATOMIC_COUNTER_BUFFER, 4, &length, GL_STATIC_COPY);
+            glBindBufferBase(GL_ATOMIC_COUNTER_BUFFER, 0, abo1);
+            glProgramUniform3ui(prog5, 0, resX, resY, resZ);
+            glUseProgram(prog5);
+            glDispatchCompute(resX/8, resY/8, resZ/8);
+        }
+
+        glBindBuffer(GL_ARRAY_BUFFER, vbo3);
+        glEnableVertexAttribArray(5);
+        glVertexAttribPointer(5, 3, GL_FLOAT, GL_FALSE, 12, 0);
 
         glActiveTexture(GL_TEXTURE4);
         glBindTexture(GL_TEXTURE_2D, tex4);
@@ -267,7 +341,7 @@ int main()
         glDisable(GL_DEPTH_TEST);
         glProgramUniform2f(prog3, 0, iResolutionX, iResolutionY);
         glUseProgram(prog3);
-        glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, V1.size()/8);
+        glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, V1.size()/6);
 
         if (iFrame == 0)
         {
@@ -280,13 +354,12 @@ int main()
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
-        ImGui::Begin("Hello World");
-        ImGui::End();
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
         glfwSwapBuffers(window1);
         glfwPollEvents();
+        // if (!screenRecording()) break;
     }
 
     int err = glGetError();

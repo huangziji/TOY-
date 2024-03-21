@@ -24,13 +24,11 @@ add_executable(Toyxx
     ../Data/Bake3.glsl
     Utility.cpp
     Precompiled.cpp
-    Main.cpp
-Debug.cpp Debug.h)
+    Main.cpp)
 target_include_directories(Toyxx PRIVATE ${CMAKE_INCLUDE_PATH})
 target_link_directories(Toyxx PRIVATE ${CMAKE_LIBRARY_PATH})
 target_link_libraries(Toyxx PRIVATE
     glfw glad dl
-    BulletSoftBody
     Bullet3Common
     BulletDynamics
     BulletCollision

@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <stdio.h>
+#include <time.h>
 #include <sys/stat.h>
 #include <dlfcn.h>
 
@@ -10,14 +11,20 @@
  *                        Hotloading                           *
 ***************************************************************/
 
-static int loadShaderS(int N, GLuint prog, const char *filename)
+static bool loadShaderD(int N, long *lastModTime, GLuint prog, const char *filename)
 {
-    FILE *f = fopen(filename, "r");
-    if (!f)
+    const time_t stop = clock();
+    struct stat libStat;
+    int err = stat(filename, &libStat);
+    if (err || *lastModTime == libStat.st_mtime)
     {
-        fprintf(stderr, "ERROR: file %s not found.\n", filename);
-        return -1;
+        // fprintf(stderr, "ERROR: file %s not found.\n", filename);
+        return false;
     }
+    *lastModTime = libStat.st_mtime;
+
+    FILE *f = fopen(filename, "r");
+    assert(f);
     fseek(f, 0, SEEK_END);
     long length = ftell(f);
     rewind(f);
@@ -57,15 +64,15 @@ static int loadShaderS(int N, GLuint prog, const char *filename)
             glDeleteShader(sha);
             fprintf(stderr, "ERROR: fail to compile %s shader. file %s\n%s\n",
                     i == 0 ? "vertex" : "fragment", filename, message);
-            return 1;
+            return true;
         }
         newShader[i] = sha;
     }
 
-    GLsizei NbShaders;
+    GLsizei count;
     GLuint oldShader[2];
-    glGetAttachedShaders(prog, 2, &NbShaders, oldShader);
-    for (int i=0; i<NbShaders; i++)
+    glGetAttachedShaders(prog, 2, &count, oldShader);
+    for (int i=0; i<count; i++)
     {
         glDetachShader(prog, oldShader[i]);
         glDeleteShader(oldShader[i]);
@@ -74,28 +81,65 @@ static int loadShaderS(int N, GLuint prog, const char *filename)
     glAttachShader(prog, newShader[1]);
     glLinkProgram(prog);
     glValidateProgram(prog);
-    return 0;
+
+    const time_t elapseTime = (clock() - stop) / 1000;
+    printf("INFO: loaded file %s. It took %d ms\n", filename, elapseTime);
+    return true;
 }
 
-#include <time.h>
-
-static bool loadShaderD(int N, long *lastModTime, GLuint prog, const char *filename)
+bool loadShader3(long *lastMod, GLuint prog, const char *filename)
 {
     const time_t stop = clock();
     struct stat libStat;
     int err = stat(filename, &libStat);
-    if (err == 0 && *lastModTime != libStat.st_mtime)
+    if (err || *lastMod == libStat.st_mtime)
     {
-        err = loadShaderS(N, prog, filename);
-        if (err >= 0)
-        {
-            const time_t elapseTime = (clock() - stop) / 1000;
-            printf("INFO: loaded file %s. It took %d ms\n", filename, elapseTime);
-            *lastModTime = libStat.st_mtime;
-            return true;
-        }
+        return false;
     }
-    return false;
+    *lastMod = libStat.st_mtime;
+
+    FILE *f = fopen(filename, "r");
+    assert(f);
+    fseek(f, 0, SEEK_END);
+    long length = ftell(f);
+    rewind(f);
+    char source[length+1]; source[length] = 0;
+    fread(source, length, 1, f);
+    fclose(f);
+
+    const char *string[] = { source };
+    const GLuint sha = glCreateShader(GL_COMPUTE_SHADER);
+    glShaderSource(sha, 1, string, NULL);
+    glCompileShader(sha);
+    int success;
+    glGetShaderiv(sha, GL_COMPILE_STATUS, &success);
+    if (!success)
+    {
+        int length;
+        glGetShaderiv(sha, GL_INFO_LOG_LENGTH, &length);
+        char message[length];
+        glGetShaderInfoLog(sha, length, &length, message);
+        glDeleteShader(sha);
+        fprintf(stderr, "ERROR: fail to compile compute shader. file %s\n%s\n",
+                filename, message);
+        return true;
+    }
+
+    GLsizei count;
+    GLuint oldShader;
+    glGetAttachedShaders(prog, 1, &count, &oldShader);
+    if (count)
+    {
+        glDetachShader(prog, oldShader);
+        glDeleteShader(oldShader);
+    }
+    glAttachShader(prog, sha);
+    glLinkProgram(prog);
+    glValidateProgram(prog);
+
+    const time_t elapseTime = (clock() - stop) / 1000;
+    printf("INFO: loaded file %s. It took %d ms\n", filename, elapseTime);
+    return true;
 }
 
 bool loadShader1(long *lastModTime, GLuint prog, const char *filename)
@@ -117,26 +161,26 @@ void *loadPlugin(const char * filename)
     const time_t stop = clock();
     struct stat libStat;
     int err = stat(filename, &libStat);
-    if (err == 0 && lastModTime != libStat.st_mtime)
+    if (err || lastModTime == libStat.st_mtime)
     {
-        if (handle)
-        {
-            assert(dlclose(handle) == 0);
-        }
-        handle = dlopen(filename, RTLD_NOW);
-        if (handle)
-        {
-            const time_t elapseTime = (clock() - stop) / 1000;
-            printf("INFO: loaded file %s. It took %d ms\n", filename, elapseTime);
-            lastModTime = libStat.st_mtime;
-            f = dlsym(handle, "mainAnimation");
-            assert(f);
-        }
-        else
-        {
-            f = NULL;
-        }
+        return f;
     }
+
+    if (handle)
+    {
+        assert(dlclose(handle) == 0);
+    }
+    handle = dlopen(filename, RTLD_NOW);
+    if (!handle)
+    {
+        return NULL;
+    }
+
+    f = dlsym(handle, "mainAnimation");
+    assert(f);
+    const time_t elapseTime = (clock() - stop) / 1000;
+    printf("INFO: loaded file %s. It took %d ms\n", filename, elapseTime);
+    lastModTime = libStat.st_mtime;
     return f;
 }
 
@@ -161,4 +205,31 @@ unsigned int loadTexture1(const char *filename)
     const time_t elapseTime = (clock() - stop) / 1000;
     printf("INFO: loaded file %s. It took %d ms\n", filename, elapseTime);
     return tex;
+}
+
+bool screenRecording()
+{
+    static const char fmt[] = "$HOME/.spotdl/ffmpeg"
+            " -r 60 -f rawvideo -pix_fmt rgb24 -s %dx%d"
+            " -i pipe: -c:v libx264 -c:a aac"
+            " -preset fast -y -pix_fmt yuv420p -crf 21 -vf vflip 1.mp4";
+
+    int vp[4];
+    glGetIntegerv(GL_VIEWPORT, vp);
+    const int resX = vp[2] - vp[0], resY = vp[3] - vp[1];
+    static char *cmd = new char[sizeof(fmt) + 16];
+    sprintf(cmd, fmt, resX, resY);
+    static FILE *pipe = popen(cmd, "w");
+    static char *buffer = new char[resX*resY*3];
+
+    glReadPixels(0, 0, resX, resY, GL_RGB, GL_UNSIGNED_BYTE, buffer);
+    fwrite(buffer, resX*resY*3, 1, pipe);
+
+    static int frame = 0;
+    if (frame++ > 60 * 5)
+    {
+        pclose(pipe);
+        return false;
+    }
+    return true;
 }

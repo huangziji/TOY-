@@ -1,24 +1,40 @@
 #include <stdio.h>
 #include <string.h>
 #include <ofbx.h>
-#include <LinearMath/btQuickprof.h>
 #include <LinearMath/btHashMap.h>
-#include <LinearMath/btTransform.h>
+#include <LinearMath/btQuickprof.h>
+#include <LinearMath/btMatrix3x3.h>
 using namespace ofbx;
 template<class T> using myArray = btAlignedObjectArray<T>;
 
 struct IkRigNode
 {
-    btVector3 world, local;
+    btMatrix3x3 tipAxis;
+    btVector3 tipOrigin, axisDir;
     float length;
 
-    btVector3 GetNormalizedT(IkRigNode const& other) const
+    IkRigNode Scaled(IkRigNode const& b) const
     {
-        btVector3 t = (world - other.world) / (length - other.length);
-        btVector3 s = local.cross(t).normalized();
-        return t;
+        IkRigNode c;
+        c.tipAxis = tipAxis.timesTranspose(b.tipAxis);
+        c.tipOrigin = (tipOrigin - b.tipOrigin) / (length - b.length);
+        c.axisDir = axisDir.cross(c.tipOrigin).normalized();
+        return c;
     }
+
+    bool SolveSpine(btVector3 & b, btVector3 & c, float l1, float l2, float l3);
 };
+
+myArray<IkRigNode> &operator<<(myArray<IkRigNode> &a, IkRigNode b)
+{
+    a.push_back(b);
+    return a;
+}
+
+myArray<IkRigNode> &operator,(myArray<IkRigNode> &a, IkRigNode b)
+{
+    return a << b;
+}
 
 static float Length(Vec3 a)
 {
@@ -68,8 +84,12 @@ static void SamplePoseRecursive(btHashMap<btHashString, IkRigNode> * out,
     if (ikNode)
     {
         ikNode->length = length;
-        ikNode->world = btVector3(world.m[12], world.m[13], world.m[14]);
-        ikNode->local = ikNode->world - btVector3(parentWorld.m[12], parentWorld.m[13], parentWorld.m[14]);
+        ikNode->tipOrigin = btVector3(world.m[12], world.m[13], world.m[14]);
+        ikNode->axisDir = ikNode->tipOrigin - btVector3(parentWorld.m[12], parentWorld.m[13], parentWorld.m[14]);
+        ikNode->tipAxis.setValue(
+                world.m[0],world.m[1],world.m[2],
+                world.m[4],world.m[5],world.m[6],
+                world.m[9],world.m[8],world.m[10] );
     }
 
     for (int i=0; node->resolveObjectLink(i); i++)
@@ -104,20 +124,20 @@ const IScene * loadFbx(const char *filename)
     return fbxScene;
 }
 
-myArray<btVector3> SamplePose(float t, const IScene *scene)
+myArray<IkRigNode> SamplePose(float t, const IScene *scene)
 {
     static const char *KEYWORDS[] = {
         "mixamorig:Hips",
         "mixamorig:Neck",
         "mixamorig:Head",
-        "mixamorig:LeftFoot",
-        "mixamorig:LeftHand",
         "mixamorig:LeftUpLeg",
+        "mixamorig:LeftFoot",
         "mixamorig:LeftShoulder",
-        "mixamorig:RightFoot",
-        "mixamorig:RightHand",
+        "mixamorig:LeftHand",
         "mixamorig:RightUpLeg",
+        "mixamorig:RightFoot",
         "mixamorig:RightShoulder",
+        "mixamorig:RightHand",
     };
 
     btHashMap<btHashString, IkRigNode> out;
@@ -129,45 +149,21 @@ myArray<btVector3> SamplePose(float t, const IScene *scene)
     const Matrix identity = { 1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1 };
     SamplePoseRecursive(&out, t, scene, scene->getRoot(), 0, identity);
 
-    const IkRigNode * hips = out.find(KEYWORDS[0]);
-    const IkRigNode * neck = out.find(KEYWORDS[1]);
-    const IkRigNode * head = out.find(KEYWORDS[2]);
-    const IkRigNode * leftFoot = out.find(KEYWORDS[3]);
-    const IkRigNode * leftHand = out.find(KEYWORDS[4]);
-    const IkRigNode * leftUpLeg = out.find(KEYWORDS[5]);
-    const IkRigNode * leftShoulder = out.find(KEYWORDS[6]);
-    const IkRigNode * rightFoot = out.find(KEYWORDS[7]);
-    const IkRigNode * rightHand = out.find(KEYWORDS[8]);
-    const IkRigNode * rightUpLeg = out.find(KEYWORDS[9]);
-    const IkRigNode * rightShoulder = out.find(KEYWORDS[10]);
+    const IkRigNode * a = out.find(KEYWORDS[0]);
+    const IkRigNode * b = out.find(KEYWORDS[1]);
+    const IkRigNode * c = out.find(KEYWORDS[2]);
+    const IkRigNode * d = out.find(KEYWORDS[3]);
+    const IkRigNode * e = out.find(KEYWORDS[4]);
+    const IkRigNode * f = out.find(KEYWORDS[5]);
+    const IkRigNode * g = out.find(KEYWORDS[6]);
+    const IkRigNode * h = out.find(KEYWORDS[7]);
+    const IkRigNode * i = out.find(KEYWORDS[8]);
+    const IkRigNode * j = out.find(KEYWORDS[9]);
+    const IkRigNode * k = out.find(KEYWORDS[10]);
 
-    btVector3 a = neck->GetNormalizedT({});
-    btVector3 b = neck->GetNormalizedT(*hips);
-    btVector3 c = head->GetNormalizedT(*neck);
-    btVector3 d = leftFoot->GetNormalizedT(*leftUpLeg);
-    btVector3 e = leftHand->GetNormalizedT(*leftShoulder);
-    btVector3 f = rightFoot->GetNormalizedT(*rightUpLeg);
-    btVector3 g = rightHand->GetNormalizedT(*rightShoulder);
-    btVector3 h = neck->local.cross(b).normalized();
-    btVector3 i = head->local.cross(c).normalized();
-    btVector3 j = leftFoot->local.cross(d).normalized();
-    btVector3 k = leftHand->local.cross(e).normalized();
-    btVector3 l = rightFoot->local.cross(f).normalized();
-    btVector3 m = rightHand->local.cross(g).normalized();
-    myArray<btVector3> res;
-    res.push_back(a);
-    res.push_back(b);
-    res.push_back(c);
-    res.push_back(d);
-    res.push_back(e);
-    res.push_back(f);
-    res.push_back(g);
-    res.push_back(h);
-    res.push_back(i);
-    res.push_back(j);
-    res.push_back(k);
-    res.push_back(l);
-    res.push_back(m);
+    myArray<IkRigNode> res;
+    res << a->Scaled({}), b->Scaled(*a), c->Scaled(*b),
+        e->Scaled(*d), g->Scaled(*f), i->Scaled(*h), k->Scaled(*j);
     return res;
 }
 

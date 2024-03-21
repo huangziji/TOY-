@@ -32,7 +32,7 @@ struct Hit
 Hit castRay(in vec3 ro, in vec3 rd);
 
 out vec4 fragColor;
-layout (std140, binding = 0) uniform VIEW { vec4 uTarget, uOrigin; };
+layout (std140, binding = 1) uniform VIEW { vec4 uTarget, uOrigin; };
 layout (location = 0) uniform vec2 iResolution;
 void main()
 {
@@ -49,12 +49,12 @@ void main()
     vec3 col = vec3(0);
     if (t < 100.)
     {
-        const vec3 sun_dir = normalize(vec3(1,2,3));
+        const vec3 sun_dir = normalize(vec3(3,2,2));
 
         vec3 nor = h.nor;
         vec3 pos = ro + rd*t;
         float sha = step( 100., castRay(pos + nor*.003, sun_dir).t )*.5+.5;
-        vec3 mate = palette(float(h.m) + 24131.23);
+        vec3 mate = palette(float(h.m) + 113124.142311);
 
         float sun_dif = saturate(dot(nor, sun_dir))*.8+.2;
         float sky_dif = saturate(dot(nor, vec3(0,1,0)))*.15;
@@ -77,12 +77,12 @@ void main()
 }
 
 layout (location = 4) uniform int uCount;
-layout (std430, binding  = 0) buffer IN_0 { mat4 aInstance[]; };
+layout (std430, binding  = 1) buffer IN_0 { mat4 aInstance[]; };
 
 vec4 plaIntersect( in vec3 ro, in vec3 rd, in vec4 p );
 vec4 boxIntersect( in vec3 ro, in vec3 rd, in vec3 h );
 vec4 sphIntersect( in vec3 ro, in vec3 rd, float ra );
-vec4 capIntersect( in vec3 ro, in vec3 rd, float he, float ra );
+vec4 capIntersect( in vec3 ro, in vec3 rd, float ra, float he );
 
 Hit castRay(in vec3 ro, in vec3 rd)
 {
@@ -94,26 +94,26 @@ Hit castRay(in vec3 ro, in vec3 rd)
     {
         mat4 x = aInstance[i];
         mat3 axis = mat3(x);
-        vec3 origin = vec3(x[0][3], x[1][3], x[2][3]);
-        vec3 halfExtend = x[3].xyz;
-        int  shapeType = floatBitsToInt(x[3][3]);
+        vec3 origin = x[3].xyz;
+        float a = x[0][3], b = x[1][3], c = x[2][3];
+        int shapeType = floatBitsToInt(x[3][3]);
 
         vec4 h;
-        vec3 O = (ro - origin) * axis;
-        vec3 D = rd * axis;
+        vec3 O = axis * (ro - origin);
+        vec3 D = axis * rd;
         switch (shapeType)
         {
         case 0:
-            h = sphIntersect(O, D, halfExtend.x);
+            h = plaIntersect(O, D, vec4(0,1,0,-a));
             break;
         case 1:
-            h = boxIntersect(O, D, halfExtend);
+            h = boxIntersect(O, D, vec3(a,b,c));
             break;
         case 2:
-            h = capIntersect(O, D, halfExtend.x, halfExtend.y);
+            h = sphIntersect(O, D, a);
             break;
         case 3:
-            h = plaIntersect(O, D, vec4(0,1,0, halfExtend.x));
+            h = capIntersect(O, D, a, b);
             break;
         default:
             break;
@@ -122,7 +122,7 @@ Hit castRay(in vec3 ro, in vec3 rd)
         if (0. < h.x && h.x < t)
         {
             t = h.x;
-            nor = axis * h.yzw;
+            nor = h.yzw * axis;
             id = i;
         }
     }
@@ -158,7 +158,7 @@ vec4 sphIntersect( in vec3 ro, in vec3 rd, float ra )
     float t = -b-h;
     return vec4(t, (ro + t*rd)/ra);
 }
-vec4 capIntersect( in vec3 ro, in vec3 rd, float he, float ra )
+vec4 capIntersect( in vec3 ro, in vec3 rd, float ra, float he )
 {
     float k2 = 1.0        - rd.y*rd.y;
     float k1 = dot(ro,rd) - ro.y*rd.y;

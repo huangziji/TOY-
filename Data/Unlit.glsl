@@ -27,7 +27,7 @@ mat4 projectionMatrix(float ar)
 
 flat _varying vec4 vCol;
 layout (location = 0) uniform vec2 iResolution;
-layout (std140, binding = 0) uniform VIEW { vec4 uTarget, uOrigin; };
+layout (std140, binding = 1) uniform VIEW { vec4 uTarget, uOrigin; };
 
 #ifdef _VS
 layout (location = 4) in vec4 aVertex;
