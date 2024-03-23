@@ -46,6 +46,6 @@ layout (location = 0) out vec4 fragColor;
 void main()
 {
     fragColor = vec4(vCol.rgb, 1.);
-    gl_FragDepth = -1.;
+    // gl_FragDepth = -1.;
 }
 #endif

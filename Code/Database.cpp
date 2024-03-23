@@ -21,8 +21,6 @@ struct IkRigNode
         c.axisDir = axisDir.cross(c.tipOrigin).normalized();
         return c;
     }
-
-    bool SolveSpine(btVector3 & b, btVector3 & c, float l1, float l2, float l3);
 };
 
 myArray<IkRigNode> &operator<<(myArray<IkRigNode> &a, IkRigNode b)

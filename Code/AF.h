@@ -10,6 +10,14 @@ class btCollisionObject;
 class btRigidBody;
 class btDynamicsWorld;
 
+struct IkRigNode
+{
+    btMatrix3x3             tipAxis;
+    btVector3               tipOrigin;
+    btVector3               axisDir;
+    float                   length;
+};
+
 class Entity
 {
     unsigned int            id_;
@@ -30,13 +38,15 @@ public:
     void UpdatePose();
 };
 
+myArray<IkRigNode> SamplePose(float t, const IScene *scene);
+
 myArray<float> &operator<<(myArray<float> &a, float b);
 
 myArray<float> &operator,(myArray<float> &a, float b);
 
 void ClearWorld(btDynamicsWorld *);
 
-btRigidBody *createRigidBody(btVector3 origin, btVector3 halfExtents);
+btRigidBody *createBox(btVector3 origin, btVector3 halfExtents);
 
 void drawRigidBody( myArray<float> &a, btCollisionObject const& rb );
 

@@ -30,7 +30,7 @@ public:
     myArray<int> const& Data() const { return _quadBuffer; }
     void clearQuads() { _quadBuffer.clear(); }
     bool loadFnt(const char *filename);
-    void draw2dText(int posX, int posY, int col, int fntSize, const char *fmt...);
+    void draw2dText(int posX, int posY, int fntSize, int col, const char *fmt...);
     void drawRectangle(int4 const& dst, int4 const& src, int col, int texSlot = 1);
 };
 
@@ -85,7 +85,7 @@ bool myGui::loadFnt(const char *filename)
     return true;
 }
 
-void myGui::draw2dText(int posX, int posY, int col, int fntSize, const char *format...)
+void myGui::draw2dText(int posX, int posY, int fntSize, int col, const char *format...)
 {
     char textString[128];
     va_list args;
@@ -121,6 +121,8 @@ void myGui::draw2dText(int posX, int posY, int col, int fntSize, const char *for
     }
 }
 
+#include <BulletSoftBody/btSoftBodyRigidBodyCollisionConfiguration.h>
+#include <BulletSoftBody/btSoftRigidDynamicsWorld.h>
 #include <btBulletDynamicsCommon.h>
 #include <cgltf.h>
 
@@ -161,7 +163,8 @@ int main()
     glfwInit();
     glfwSetErrorCallback(error_callback);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_COMPAT_PROFILE);
     glfwWindowHint(GLFW_SAMPLES, 4);
     // glfwWindowHint(GLFW_FLOATING, GL_TRUE);
 
@@ -211,26 +214,25 @@ int main()
         static uint32_t iFrame = -1;
         glfwGetWindowSize(window1, &iResolutionX, &iResolutionY);
         glfwGetCursorPos(window1, &iMouseX, &iMouseY);
-        iMouseY = iResolutionY-iMouseY;
         static float lastFrameTime = 0;
         iTimeDelta = iTime - lastFrameTime;
         lastFrameTime = iTime;
         iFrame += 1;
 
-        static btCollisionConfiguration *conf = new btDefaultCollisionConfiguration;
-        static btDynamicsWorld *physics = new btDiscreteDynamicsWorld(
+        static btSoftBodyRigidBodyCollisionConfiguration *conf = new btSoftBodyRigidBodyCollisionConfiguration;
+        static btSoftRigidDynamicsWorld *physics = new btSoftRigidDynamicsWorld(
                     new btCollisionDispatcher(conf), new btDbvtBroadphase,
                     new btSequentialImpulseConstraintSolver, conf);
 
         typedef struct { myArray<float> U1,W1,V2; }Output;
         Output out;
-        typedef void (plugin)(Output *, btDynamicsWorld *, float, float);
+        typedef void (plugin)(Output *, btDynamicsWorld *, float, float, float, float, float, float);
         void *f = loadPlugin("./libToyxx_Plugin.so");
-        if (f) ((plugin*)f)(&out, physics, iTime, iTimeDelta);
+        if (f) ((plugin*)f)(&out, physics, iTime, iTimeDelta, iResolutionX, iResolutionY, iMouseX, iMouseY);
 
         gui.clearQuads();
         static float fps = 0; if ((iFrame & 0xf) == 0) fps = 1. / iTimeDelta;
-        gui.draw2dText(iResolutionX*.15, iResolutionY*.9, 0xFF7FFFFF, 20,
+        gui.draw2dText(iResolutionX*.15, iResolutionY*.9,  20, 0xFF7FFFFF,
             "%.2f   %.1f fps   %dx%d", iTime, fps, iResolutionX, iResolutionY);
         gui.drawRectangle(Int4( iResolutionX*.1, iResolutionY*.9, iResolutionY*.05,iResolutionY*.05 ),
                           Int4( 0, 0, iResolutionY*.5, iResolutionY*.5 ), 0xFF7FFFFF);

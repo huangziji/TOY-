@@ -29,6 +29,7 @@ target_include_directories(Toyxx PRIVATE ${CMAKE_INCLUDE_PATH})
 target_link_directories(Toyxx PRIVATE ${CMAKE_LIBRARY_PATH})
 target_link_libraries(Toyxx PRIVATE
     glfw glad dl
+    BulletSoftBody
     Bullet3Common
     BulletDynamics
     BulletCollision
@@ -39,6 +40,7 @@ add_library(Toyxx_Plugin SHARED Plugin.cpp AF.cpp AF.h Database.cpp)
 target_include_directories(Toyxx_Plugin PRIVATE ${CMAKE_INCLUDE_PATH})
 target_link_directories(Toyxx_Plugin PRIVATE ${CMAKE_LIBRARY_PATH})
 target_link_libraries(Toyxx_Plugin PRIVATE
+    BulletSoftBody
     Bullet3Common
     BulletDynamics
     BulletCollision
